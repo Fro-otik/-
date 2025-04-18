@@ -1,0 +1,4 @@
+/Build/*
+  Content-Type: application/octet-stream
+  Access-Control-Allow-Origin: *
+  Cache-Control: max-age=600
