@@ -9,12 +9,14 @@
     <meta http-equiv="Content-Security-Policy" 
       content="default-src 'self' data: blob: https://fro-otik.github.io;
                script-src 'self' 'unsafe-inline' 'unsafe-eval' https://fro-otik.github.io;
+               style-src 'self' 'unsafe-inline' https://fro-otik.github.io;
                connect-src 'self' https://fro-otik.github.io;
                img-src 'self' data: blob: https://fro-otik.github.io;
                media-src 'self' blob:;
                frame-src 'none';
                object-src 'none'">
-    <style>
+    <style id="dynamic-styles">
+      /* Все стили вынесены сюда */
       #start-button {
         position: absolute;
         z-index: 10;
@@ -36,13 +38,19 @@
       #unity-container {
         position: relative;
       }
+      #unity-canvas {
+        display: none;
+      }
+      #unity-loading-bar {
+        display: none;
+      }
     </style>
   </head>
   <body>
     <div id="unity-container" class="unity-desktop">
       <button id="start-button">START GAME</button>
-      <canvas id="unity-canvas" width=960 height=600 tabindex="-1" style="display: none;"></canvas>
-      <div id="unity-loading-bar" style="display: none;">
+      <canvas id="unity-canvas" width=960 height=600 tabindex="-1"></canvas>
+      <div id="unity-loading-bar">
         <div id="unity-logo"></div>
         <div id="unity-progress-bar-empty">
           <div id="unity-progress-bar-full"></div>
@@ -56,23 +64,28 @@
 
     <script>
       // Блокировка нежелательных скриптов
-      window.addEventListener('load', () => {
+      (function() {
         const blockedDomains = ['retagro.com'];
-        document.querySelectorAll('script').forEach(script => {
-          if (script.src && blockedDomains.some(domain => script.src.includes(domain))) {
+        const scripts = document.querySelectorAll('script[src]');
+        scripts.forEach(script => {
+          if (blockedDomains.some(domain => script.src.includes(domain))) {
             script.remove();
           }
         });
+      })();
+
+      // Инициализация Unity
+      document.getElementById("start-button").addEventListener('click', function() {
+        this.style.display = "none";
+        initUnity();
       });
 
-      let unityInstance = null;
-      const canvas = document.getElementById("unity-canvas");
-      const startButton = document.getElementById("start-button");
-
       function initUnity() {
-        startButton.style.display = "none";
-        document.getElementById("unity-loading-bar").style.display = "block";
+        const canvas = document.getElementById("unity-canvas");
+        const loadingBar = document.getElementById("unity-loading-bar");
+        
         canvas.style.display = "block";
+        loadingBar.style.display = "block";
 
         const config = {
           dataUrl: "Build/9.data",
@@ -82,59 +95,59 @@
           companyName: "DefaultCompany",
           productName: "Game",
           productVersion: "1.0",
-          showBanner: (msg, type) => {
-            const banner = document.getElementById("unity-warning");
-            banner.innerHTML = `<div style="padding: 10px; background: ${
-              type === 'error' ? '#ff4444' : '#ffcc00'
-            }">${msg}</div>`;
-            if (type !== 'error') {
-              setTimeout(() => banner.innerHTML = '', 5000);
-            }
-          },
+          showBanner: showUnityBanner,
         };
 
         const script = document.createElement('script');
         script.src = "Build/9.loader.js";
         script.onload = () => {
-          createUnityInstance(canvas, config, (progress) => {
-            document.getElementById("unity-progress-bar-full").style.width = 
-              `${Math.min(100, 100 * progress)}%`;
-          }).then(instance => {
-            unityInstance = instance;
-            document.getElementById("unity-loading-bar").style.display = "none";
-            
-            // Обработка аудио после жеста пользователя
-            const handleAudio = () => {
-              if (unityInstance.Module.audioContext?.state === 'suspended') {
-                unityInstance.Module.audioContext.resume();
-              }
-            };
-            canvas.addEventListener('click', handleAudio);
-            canvas.addEventListener('touchstart', handleAudio);
-
-            // Полноэкранный режим
-            document.getElementById("unity-fullscreen-button").onclick = () => {
-              unityInstance.SetFullscreen(1);
-            };
-          }).catch(err => {
-            console.error('Unity initialization failed:', err);
-            document.getElementById("unity-warning").innerHTML = 
-              `<div style="background: #ff4444; padding: 10px;">
-                Failed to load game: ${err.message}
-              </div>`;
-          });
+          createUnityInstance(canvas, config, updateProgress)
+            .then(handleUnitySuccess)
+            .catch(handleUnityError);
         };
-        script.onerror = () => {
-          document.getElementById("unity-warning").innerHTML = 
-            `<div style="background: #ff4444; padding: 10px;">
-              Failed to load Unity runtime
-            </div>`;
-        };
+        script.onerror = () => handleLoadError();
         document.body.appendChild(script);
       }
 
-      startButton.addEventListener('click', initUnity);
-      startButton.addEventListener('touchstart', initUnity, { passive: true });
+      function updateProgress(progress) {
+        document.getElementById("unity-progress-bar-full").style.width = 
+          `${Math.min(100, 100 * progress)}%`;
+      }
+
+      function handleUnitySuccess(instance) {
+        document.getElementById("unity-loading-bar").style.display = "none";
+        
+        // Обработка аудио
+        const handleAudio = () => {
+          if (instance.Module.audioContext?.state === 'suspended') {
+            instance.Module.audioContext.resume();
+          }
+        };
+        
+        document.getElementById("unity-canvas").addEventListener('click', handleAudio);
+        document.getElementById("unity-fullscreen-button").onclick = () => {
+          instance.SetFullscreen(1);
+        };
+      }
+
+      function handleUnityError(error) {
+        console.error('Unity initialization failed:', error);
+        showUnityBanner(`Failed to load game: ${error.message}`, 'error');
+      }
+
+      function handleLoadError() {
+        showUnityBanner('Failed to load Unity runtime', 'error');
+      }
+
+      function showUnityBanner(msg, type) {
+        const banner = document.getElementById("unity-warning");
+        banner.innerHTML = `<div style="padding: 10px; background: ${
+          type === 'error' ? '#ff4444' : '#ffcc00'
+        }">${msg}</div>`;
+        if (type !== 'error') {
+          setTimeout(() => banner.innerHTML = '', 5000);
+        }
+      }
 
       // Адаптация для мобильных устройств
       if (/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) {
@@ -143,7 +156,7 @@
         meta.content = 'width=device-width, height=device-height, initial-scale=1.0, user-scalable=no, shrink-to-fit=yes';
         document.head.appendChild(meta);
         document.getElementById("unity-container").className = "unity-mobile";
-        canvas.className = "unity-mobile";
+        document.getElementById("unity-canvas").className = "unity-mobile";
       }
     </script>
   </body>
